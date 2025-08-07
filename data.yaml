@@ -1,0 +1,17 @@
+train: C:/Users/Windows/Desktop/train/infrared_only/images
+val: C:/Users/Windows/Desktop/val/infrared_only/images
+test: /content/dataRgb/test/images
+#infrared:
+#train: C:\Users\Windows\Downloads\Anti-UAV-RGBT\train\infrared_only\images
+#test: C:\Users\Windows\Downloads\Anti-UAV-RGBT\test\infrared_only\images
+#val: C:\Users\Windows\Downloads\Anti-UAV-RGBT\val\infrared_only\images
+#visible: 
+#train: C:\Users\Windows\Downloads\Anti-UAV-RGBT\train\visible_only\images
+#test: C:\Users\Windows\Downloads\Anti-UAV-RGBT\test\visible_only\images
+#val: C:\Users\Windows\Downloads\Anti-UAV-RGBT\val\visible_only\images
+#fusion: 
+#train: C:\Users\Windows\Downloads\Anti-UAV-RGBT\train\visible_only\images
+#test: C:\Users\Windows\Downloads\Anti-UAV-RGBT\test\visible_only\images
+#val: C:\Users\Windows\Downloads\Anti-UAV-RGBT\val\visible_only\images
+nc: 1
+names: ['drone']
