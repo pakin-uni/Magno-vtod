@@ -1312,7 +1312,7 @@ class C2f_EMA(nn.Module):
         self.m2 = Bottleneck(c_, c_, shortcut, g, e=1.0)
         self.m3 = Bottleneck(c_, c_, shortcut, g, e=1.0)
 
-        # 🔥 Final output projection
+        # Final output projection
         self.cv3 = Conv(5 * c_, c2, 1, 1)  # <-- FIXED from 4c_ to 5c_
 
     def forward(self, x):
