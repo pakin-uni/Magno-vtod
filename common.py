@@ -1232,3 +1232,99 @@ class MagnoFusionBlock(nn.Module):
         self.Xoff_prev = None
         self.Ypos_on_prev = None
         self.Ypos_off_prev = None
+
+class EMA(nn.Module):
+    def __init__(self, channels, groups=4):
+        super(EMA, self).__init__()
+        assert channels % groups == 0, "Channels must be divisible by groups"
+        self.groups = groups
+        self.gc = channels // groups  # channels per group
+
+        self.fusion_conv = nn.Conv2d(self.gc, self.gc, kernel_size=1, bias=False)
+        self.conv_3x3 = nn.Conv2d(self.gc, self.gc, kernel_size=3, padding=1, bias=False)
+        self.conv_3x3_csl = nn.Conv2d(self.gc, self.gc, kernel_size=3, padding=1, bias=False)
+        self.norm = nn.GroupNorm(groups, channels)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        B, C, H, W = x.shape
+        G, gc = self.groups, self.gc
+        x_grouped = x.view(B, G, gc, H, W).reshape(B * G, gc, H, W)
+
+        # 1. Directional Attention (1x1 Branch)
+        x_pool = F.adaptive_avg_pool2d(x_grouped, (1, W))
+        y_pool = F.adaptive_avg_pool2d(x_grouped, (H, 1))
+        y_pool_t = y_pool.permute(0, 1, 3, 2)
+
+        fusion = torch.cat([x_pool, y_pool_t], dim=3)
+        fusion = self.fusion_conv(fusion)
+
+        weight_x = self.sigmoid(fusion[:, :, 0, :W].unsqueeze(2))
+        weight_y = self.sigmoid(fusion[:, :, 0, W:].unsqueeze(3))
+        directional_attn = torch.matmul(weight_y, weight_x)
+
+        x_reweighted = x_grouped * directional_attn  # For final reweighting
+
+        # 2. Cross-Spatial Learning (CSL Paths)
+        # Path 1
+        normed_input = x_reweighted.view(B, G, gc, H, W).view(B, C, H, W)
+        normed = self.norm(normed_input).view(B * G, gc, H, W)
+
+        avg_x1 = F.adaptive_avg_pool2d(normed, (H, 1))
+        avg_y1 = F.adaptive_avg_pool2d(normed, (1, W))
+        soft_x1 = F.softmax(avg_x1, dim=2).mean(1)
+        soft_y1 = F.softmax(avg_y1, dim=3).mean(1)
+        attn_map1 = torch.bmm(soft_x1, soft_y1).view(B, G, 1, H, W)
+
+        # Path 2
+        csl_feat = self.conv_3x3_csl(x_grouped)
+        avg_x2 = F.adaptive_avg_pool2d(csl_feat, (H, 1))
+        avg_y2 = F.adaptive_avg_pool2d(csl_feat, (1, W))
+        soft_x2 = F.softmax(avg_x2, dim=2).mean(1)
+        soft_y2 = F.softmax(avg_y2, dim=3).mean(1)
+        attn_map2 = torch.bmm(soft_x2, soft_y2).view(B, G, 1, H, W)
+
+        # Combine both attention maps + sigmoid
+        attn_sigmoid = self.sigmoid(attn_map1 + attn_map2)
+
+        # Residual connection: add to grouped input
+        residual = attn_sigmoid + x_grouped.view(B, G, gc, H, W)
+        out = x_reweighted.view(B, G, gc, H, W) * residual
+        out = out.view(B, C, H, W)
+        return out
+
+class C2f_EMA(nn.Module):
+    def __init__(self, c1, c2, num_blocks=3, shortcut=False, g=1, e=0.5):
+        super().__init__()
+        c_ = int(c2 * e)
+
+        # Initial projection and EMA
+        self.cv1 = Conv(c1, 2 * c_, 1, 1)
+        self.ema = EMA(2 * c_)
+
+        # First bottleneck after EMA
+        self.m1 = Bottleneck(2 * c_, c_, shortcut, g, e=1.0)
+
+        # Split path after EMA
+        self.cv2 = Conv(2 * c_, c_, 1, 1)
+
+        # Second and third bottlenecks
+        self.m2 = Bottleneck(c_, c_, shortcut, g, e=1.0)
+        self.m3 = Bottleneck(c_, c_, shortcut, g, e=1.0)
+
+        # 🔥 Final output projection
+        self.cv3 = Conv(5 * c_, c2, 1, 1)  # <-- FIXED from 4c_ to 5c_
+
+    def forward(self, x):
+        y = self.cv1(x)
+        y = self.ema(y)
+
+        y1 = self.m1(y)
+        y2 = self.cv2(y)
+        y2a = self.m2(y2)
+        y2b = self.m3(y2a)
+        
+        # Concatenate everything
+        out = self.cv3(torch.cat((y, y1, y2a, y2b), dim=1))
+        #print(out.shape)
+        return out
