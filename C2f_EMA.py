@@ -122,8 +122,6 @@ class EMA(nn.Module):
         return out.view(B, C, H, W)
     
 
-
-
 class C2f_EMA(nn.Module):
     def __init__(self, c1, c2, num_blocks=3, shortcut=False, g=1, e=0.5, dropout_p=0.0):
         super().__init__()
